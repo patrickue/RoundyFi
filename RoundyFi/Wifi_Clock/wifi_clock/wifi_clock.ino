@@ -1,8 +1,14 @@
 #include <ESP8266WiFi.h>
+#include <ESP8266HTTPClient.h>
 #include <NTPClient.h>
 #include <WiFiUdp.h>
 
+#include <ArduinoJson.h>
 #include <Arduino_GFX_Library.h>
+
+#include <WiFiClient.h>
+
+WiFiClientSecure wifiClient;
 
 #if defined(DISPLAY_DEV_KIT)
 Arduino_GFX *gfx = create_default_Arduino_GFX();
@@ -26,14 +32,21 @@ Arduino_GFX *gfx = new Arduino_GC9A01(bus, 16 /* RST */, 0 /* rotation */, true 
 #define TWELFTH_RADIAN 0.52359878
 #define RIGHT_ANGLE_RADIAN 1.5707963
 
-const char *ssid     = "Write_your_wifi_name";
-const char *password = "Write_your_wifi_password";
+const char *ssid     = "";
+const char *password = "";
 
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "pool.ntp.org");
 
 String weekDays[7]={"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
 String months[12]={"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"};
+
+
+const String api_url = "https://api.electricitymap.org/v3/power-breakdown/latest?";
+const String qZone = "zone=DE";
+const String api_key = "";  //your api key
+const String rqs = api_url + qZone;
+const String hydrogrid_health = "https://api.hydrogrid.ai/v1/health";
 
 
 static int16_t w, h, center;
@@ -62,6 +75,9 @@ void setup(void)
       delay(500);
       Serial.print(".");
     }
+
+    Serial.println("WiFi Verbunden!");
+    wifiClient.setInsecure();
 
     // Initialize a NTPClient to get time
     timeClient.begin();
@@ -121,6 +137,8 @@ void setup(void)
 void loop()
 {
     timeClient.update();  
+    getEnergySplit();
+
     unsigned long epochTime = timeClient.getEpochTime();
     String formattedTime = timeClient.getFormattedTime();
     String weekDay = weekDays[timeClient.getDay()];
@@ -197,6 +215,104 @@ void loop()
 
         delay(1);
     }
+}
+
+int i = 0;
+DynamicJsonDocument doc(24576);
+int color = GREEN;
+
+void getEnergySplit(){
+  HTTPClient http;
+  http.begin(wifiClient, rqs);
+  http.addHeader("auth-token", "");
+  int httpCode = http.GET();
+
+  if (httpCode > 0) { 
+
+    String response = http.getString();
+    //Serial.println(response);
+    DeserializationError error = deserializeJson(doc, response);
+
+    // Test if parsing succeeds.
+    if (error) {
+
+      String errorStr = error.c_str();
+
+      Serial.println(errorStr);
+
+      delay(10000);
+
+    }else{
+
+      Serial.println("deserializeJson() no error.");
+
+      // const char* hydrogrid_version = doc["version"];
+
+      // // Print values.
+      // Serial.println("vers: " + String(hydrogrid_version));
+      
+      // gfx->setCursor(0, 120);
+      // gfx->setTextColor(color);
+      // gfx->setTextSize(2);
+      // gfx->println("Vers:" + String(hydrogrid_version));
+
+      const char* zone = doc["zone"];
+
+      JsonObject production = doc["powerProductionBreakdown"];
+      int coal = production["coal"];
+      int wind = production["wind"];
+      int solar = production["solar"];
+      int hydro = production["hydro"];
+      int gas = production["gas"];
+      int oil = production["oil"];
+      int pump = production["pump"];
+
+      // Print values.
+      Serial.println("Zone: " + String(zone));
+      
+      gfx->setCursor(30, 40);
+      gfx->setTextColor(color);
+      gfx->setTextSize(2);
+      gfx->println("Zone: " + String(zone));
+
+      gfx->setCursor(30, 60);
+      gfx->setTextColor(WHITE);
+      gfx->setTextSize(2);
+      gfx->println("Coal: " + String(coal) + "MW");
+
+      gfx->setCursor(30, 80);
+      gfx->setTextColor(GREEN);
+      gfx->setTextSize(2);
+      gfx->println("Wind: " + String(wind) + "MW");
+
+      gfx->setCursor(30, 100);
+      gfx->setTextColor(YELLOW);
+      gfx->setTextSize(2);
+      gfx->println("Solar:" + String(solar) + "MW");
+
+      gfx->setCursor(30, 120);
+      gfx->setTextColor(BLUE);
+      gfx->setTextSize(2);
+      gfx->println("Hydro:" + String(hydro) + "MW");
+
+      gfx->setCursor(30, 140);
+      gfx->setTextColor(YELLOW);
+      gfx->setTextSize(2);
+      gfx->println("Gas:  " + String(gas) + "MW");
+      
+      delay(10000);
+      i = i+1;
+      Serial.println(i);
+      if (i>=3)
+      {
+        i = 0;
+      }
+    }
+
+  }else{
+    Serial.println("http.GET() == 0");
+  }
+  http.end();   //Close connection
 }
 
 void draw_round_clock_mark(int16_t innerR1, int16_t outerR1, int16_t innerR2, int16_t outerR2, int16_t innerR3, int16_t outerR3)
